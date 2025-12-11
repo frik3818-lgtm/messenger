@@ -293,73 +293,64 @@ async function login() {
     }
 }
 
-// Регистрация
 async function register() {
     const username = document.getElementById('register-username').value.trim();
-    const email = document.getElementById('register-email').value.trim();
     const password = document.getElementById('register-password').value;
     
-    if (!username || !email || !password) {
+    if (!username || !password) {
         showNotification('Заполните все поля', 'error');
         return;
     }
     
-    const result = await firebaseApp.registerUser(username, email, password);
+    // Дополнительная валидация
+    if (username.length < 3 || username.length > 20) {
+        showNotification('Ник должен быть от 3 до 20 символов', 'error');
+        return;
+    }
+    
+    const validChars = /^[a-zA-Z0-9_-]+$/;
+    if (!validChars.test(username)) {
+        showNotification('Только буквы, цифры, _ и -', 'error');
+        return;
+    }
+    
+    if (password.length < 6) {
+        showNotification('Пароль должен быть минимум 6 символов', 'error');
+        return;
+    }
+    
+    // Используем упрощенную регистрацию
+    const result = await firebaseApp.registerUserSimple(username, password);
     
     if (result.success) {
         showNotification(result.message, 'success');
         // Очищаем форму регистрации
         document.getElementById('register-form').reset();
+        // Переключаемся на вкладку входа
         switchAuthTab('login');
     } else {
         showNotification(result.error, 'error');
     }
 }
 
-// Забыли пароль
-async function forgotPassword() {
-    const email = prompt('Введите ваш email для восстановления пароля:');
+// Вход (обновленная версия)
+async function login() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
     
-    if (!email) return;
-    
-    try {
-        await auth.sendPasswordResetEmail(email);
-        showNotification('Инструкции по восстановлению отправлены на email', 'success');
-    } catch (error) {
-        showNotification('Ошибка отправки email восстановления', 'error');
+    if (!username || !password) {
+        showNotification('Заполните все поля', 'error');
+        return;
     }
-}
-
-// Загрузка данных пользователя
-async function loadUserData(userId) {
-    try {
-        // Загружаем данные пользователя
-        state.currentUserData = await firebaseApp.getUserData(userId);
-        
-        if (!state.currentUserData) {
-            await firebaseApp.logoutUser(userId);
-            return;
-        }
-        
-        // Сохраняем данные в localStorage
-        localStorage.setItem('username', state.currentUserData.displayName);
-        localStorage.setItem('avatar', state.currentUserData.avatar);
-        
-        // Обновляем UI
-        updateUserUI();
-        
-        // Загружаем серверы пользователя
-        state.servers = await firebaseApp.getUserServers(userId);
-        renderServers();
-        
-        // Если есть серверы, загружаем первый
-        if (state.servers.length > 0) {
-            await switchServer(state.servers[0]);
-        }
-        
-    } catch (error) {
-        console.error('Error loading user data:', error);
-        showNotification('Ошибка загрузки данных', 'error');
+    
+    // Используем упрощенный вход
+    const result = await firebaseApp.loginUserSimple(username, password);
+    
+    if (result.success) {
+        showNotification(result.message, 'success');
+        // Приложение автоматически переключится через onAuthStateChanged
+    } else {
+        showNotification(result.error, 'error');
     }
 }
 
