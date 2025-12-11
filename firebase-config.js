@@ -1,4 +1,4 @@
-// Конфигурация Firebase (замените на свою)
+// Конфигурация Firebase (ЗАМЕНИТЕ НА СВОЮ!)
 const firebaseConfig = {
     apiKey: "AIzaSyD7QtF9c4WgQOv2v_8K23_B9vY-5VK1V7M",
     authDomain: "anubis-messenger.firebaseapp.com",
@@ -15,24 +15,20 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
 
-// Коллекции
-const usersCollection = db.collection('users');
-const serversCollection = db.collection('servers');
-const messagesCollection = db.collection('messages');
-
 // Объект для работы с Firebase
 const firebaseApp = {
     // Проверка доступности ника
     async checkUsernameAvailability(username) {
         try {
-            const snapshot = await usersCollection
+            const usersRef = db.collection('users');
+            const snapshot = await usersRef
                 .where('username', '==', username.toLowerCase())
                 .limit(1)
                 .get();
             
             return {
                 available: snapshot.empty,
-                message: snapshot.empty ? 'Ник свободен' : 'Ник уже занят'
+                message: snapshot.empty ? '✓ Ник свободен' : '✗ Ник уже занят'
             };
         } catch (error) {
             console.error('Error checking username:', error);
@@ -40,7 +36,7 @@ const firebaseApp = {
         }
     },
 
-    // Упрощенная регистрация (без email подтверждения)
+    // Упрощенная регистрация
     async registerUserSimple(username, password) {
         try {
             // Проверяем ник
@@ -50,28 +46,32 @@ const firebaseApp = {
                 return { success: false, error: 'Этот ник уже занят' };
             }
             
-            // Создаем уникальный email на основе ника (чтобы обойти проверку Firebase)
-            const uniqueEmail = `${username.toLowerCase()}@anubis.local`;
+            // Создаем уникальный email для Firebase
+            const uniqueEmail = `${username.toLowerCase().replace(/[^a-z0-9]/g, '')}_${Date.now()}@anubis.local`;
+            
+            console.log('Creating user with email:', uniqueEmail);
             
             // Создаем пользователя в Firebase Auth
             const userCredential = await auth.createUserWithEmailAndPassword(uniqueEmail, password);
             const user = userCredential.user;
             
-            // Обновляем email на пустой (не используется)
-            await user.updateEmail("");
+            console.log('User created:', user.uid);
             
             // Сохраняем данные в Firestore
-            await usersCollection.doc(user.uid).set({
+            const usersRef = db.collection('users');
+            await usersRef.doc(user.uid).set({
                 uid: user.uid,
                 username: username.toLowerCase(),
                 displayName: username,
-                email: "", // Пустой email
+                email: uniqueEmail,
                 avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=7289da&color=fff`,
                 status: 'online',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
                 servers: []
             });
+            
+            console.log('User data saved to Firestore');
             
             // Создаем домашний сервер для пользователя
             await this.createHomeServer(user.uid, username);
@@ -83,13 +83,13 @@ const firebaseApp = {
             };
             
         } catch (error) {
-            console.error('Registration error:', error);
+            console.error('Registration error:', error.code, error.message);
             
             let errorMessage = 'Ошибка регистрации';
             
             switch(error.code) {
                 case 'auth/email-already-in-use':
-                    errorMessage = 'Пользователь с таким ником уже существует';
+                    errorMessage = 'Попробуйте другой ник';
                     break;
                 case 'auth/invalid-email':
                     errorMessage = 'Недопустимый ник';
@@ -100,34 +100,50 @@ const firebaseApp = {
                 case 'auth/weak-password':
                     errorMessage = 'Пароль слишком слабый (минимум 6 символов)';
                     break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Проблемы с интернет соединением';
+                    break;
             }
             
             return { success: false, error: errorMessage };
         }
     },
 
-    // Упрощенный вход (по нику и паролю)
+    // Упрощенный вход
     async loginUserSimple(username, password) {
         try {
+            console.log('Trying to login user:', username);
+            
             // Находим пользователя по никнейму
-            const snapshot = await usersCollection
+            const usersRef = db.collection('users');
+            const snapshot = await usersRef
                 .where('username', '==', username.toLowerCase())
                 .limit(1)
                 .get();
             
             if (snapshot.empty) {
+                console.log('User not found in Firestore');
                 return { success: false, error: 'Пользователь не найден' };
             }
             
-            // Создаем уникальный email для входа
-            const uniqueEmail = `${username.toLowerCase()}@anubis.local`;
+            const userDoc = snapshot.docs[0];
+            const userData = userDoc.data();
+            const email = userData.email;
             
-            // Входим с этим email и паролем
-            const userCredential = await auth.signInWithEmailAndPassword(uniqueEmail, password);
+            console.log('Found user email:', email);
+            
+            if (!email) {
+                return { success: false, error: 'Ошибка входа: email не найден' };
+            }
+            
+            // Входим с email и паролем
+            const userCredential = await auth.signInWithEmailAndPassword(email, password);
             const user = userCredential.user;
             
+            console.log('Login successful:', user.uid);
+            
             // Обновляем статус пользователя
-            await usersCollection.doc(user.uid).update({
+            await usersRef.doc(user.uid).update({
                 status: 'online',
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -135,11 +151,12 @@ const firebaseApp = {
             return { 
                 success: true, 
                 user: user,
+                userData: userData,
                 message: 'Вход выполнен успешно!' 
             };
             
         } catch (error) {
-            console.error('Login error:', error);
+            console.error('Login error:', error.code, error.message);
             
             let errorMessage = 'Ошибка входа';
             
@@ -150,8 +167,14 @@ const firebaseApp = {
                 case 'auth/wrong-password':
                     errorMessage = 'Неверный пароль';
                     break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Неверный формат данных';
+                    break;
                 case 'auth/user-disabled':
                     errorMessage = 'Аккаунт отключен';
+                    break;
+                case 'auth/network-request-failed':
+                    errorMessage = 'Проблемы с интернет соединением';
                     break;
             }
             
@@ -162,18 +185,21 @@ const firebaseApp = {
     // Создание домашнего сервера
     async createHomeServer(userId, username) {
         try {
+            const serversRef = db.collection('servers');
+            const usersRef = db.collection('users');
+            
             const serverData = {
                 name: `${username}'s Server`,
                 ownerId: userId,
                 members: [userId],
-                channels: ['general', 'chat'],
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            const serverRef = await serversCollection.add(serverData);
+            const serverRef = await serversRef.add(serverData);
+            console.log('Home server created:', serverRef.id);
             
             // Обновляем список серверов пользователя
-            await usersCollection.doc(userId).update({
+            await usersRef.doc(userId).update({
                 servers: firebase.firestore.FieldValue.arrayUnion(serverRef.id)
             });
             
@@ -191,18 +217,16 @@ const firebaseApp = {
     // Создание канала
     async createChannel(serverId, name, type, creatorId) {
         try {
-            const channelData = {
+            const channelsRef = db.collection('channels');
+            await channelsRef.add({
                 serverId: serverId,
                 name: name,
                 type: type,
                 creatorId: creatorId,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
                 topic: 'Добро пожаловать!'
-            };
-            
-            const channelsCollection = db.collection('channels');
-            await channelsCollection.add(channelData);
-            
+            });
+            console.log('Channel created:', name);
         } catch (error) {
             console.error('Error creating channel:', error);
         }
@@ -211,7 +235,8 @@ const firebaseApp = {
     // Получение данных пользователя
     async getUserData(userId) {
         try {
-            const doc = await usersCollection.doc(userId).get();
+            const usersRef = db.collection('users');
+            const doc = await usersRef.doc(userId).get();
             return doc.exists ? doc.data() : null;
         } catch (error) {
             console.error('Error getting user data:', error);
@@ -222,7 +247,8 @@ const firebaseApp = {
     // Получение серверов пользователя
     async getUserServers(userId) {
         try {
-            const userDoc = await usersCollection.doc(userId).get();
+            const usersRef = db.collection('users');
+            const userDoc = await usersRef.doc(userId).get();
             if (!userDoc.exists) return [];
             
             const userData = userDoc.data();
@@ -230,9 +256,11 @@ const firebaseApp = {
             
             if (serverIds.length === 0) return [];
             
+            const serversRef = db.collection('servers');
             const servers = [];
+            
             for (const serverId of serverIds) {
-                const serverDoc = await serversCollection.doc(serverId).get();
+                const serverDoc = await serversRef.doc(serverId).get();
                 if (serverDoc.exists) {
                     servers.push({ id: serverId, ...serverDoc.data() });
                 }
@@ -249,6 +277,9 @@ const firebaseApp = {
     // Создание нового сервера
     async createServer(name, ownerId, icon = null) {
         try {
+            const serversRef = db.collection('servers');
+            const usersRef = db.collection('users');
+            
             const serverData = {
                 name: name,
                 ownerId: ownerId,
@@ -257,10 +288,10 @@ const firebaseApp = {
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
-            const serverRef = await serversCollection.add(serverData);
+            const serverRef = await serversRef.add(serverData);
             
             // Обновляем список серверов пользователя
-            await usersCollection.doc(ownerId).update({
+            await usersRef.doc(ownerId).update({
                 servers: firebase.firestore.FieldValue.arrayUnion(serverRef.id)
             });
             
@@ -278,15 +309,14 @@ const firebaseApp = {
     // Отправка сообщения
     async sendMessage(channelId, userId, content) {
         try {
-            const messageData = {
+            const messagesRef = db.collection('messages');
+            await messagesRef.add({
                 channelId: channelId,
                 userId: userId,
                 content: content,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
                 edited: false
-            };
-            
-            await messagesCollection.add(messageData);
+            });
             return { success: true };
             
         } catch (error) {
@@ -298,7 +328,8 @@ const firebaseApp = {
     // Получение сообщений
     async getMessages(channelId, limit = 50) {
         try {
-            const snapshot = await messagesCollection
+            const messagesRef = db.collection('messages');
+            const snapshot = await messagesRef
                 .where('channelId', '==', channelId)
                 .orderBy('timestamp', 'desc')
                 .limit(limit)
@@ -317,25 +348,12 @@ const firebaseApp = {
         }
     },
 
-    // Слушатель сообщений в реальном времени
-    onMessages(channelId, callback) {
-        return messagesCollection
-            .where('channelId', '==', channelId)
-            .orderBy('timestamp')
-            .onSnapshot(snapshot => {
-                const messages = [];
-                snapshot.forEach(doc => {
-                    messages.push({ id: doc.id, ...doc.data() });
-                });
-                callback(messages);
-            });
-    },
-
     // Выход из системы
     async logoutUser(userId) {
         try {
             if (userId) {
-                await usersCollection.doc(userId).update({
+                const usersRef = db.collection('users');
+                await usersRef.doc(userId).update({
                     status: 'offline',
                     lastSeen: firebase.firestore.FieldValue.serverTimestamp()
                 });
