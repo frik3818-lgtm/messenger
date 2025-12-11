@@ -1,177 +1,324 @@
-// Конфигурация Firebase (замените на свою)
+// Конфигурация Firebase
 const firebaseConfig = {
-    apiKey: "AIzaSyC_your-api-key-here",
-    authDomain: "your-project-id.firebaseapp.com",
-    projectId: "your-project-id",
-    storageBucket: "your-project-id.appspot.com",
-    messagingSenderId: "your-sender-id",
-    appId: "1:your-app-id:web:your-app-hash"
+    apiKey: "AIzaSyD7QtF9c4WgQOv2v_8K23_B9vY-5VK1V7M",
+    authDomain: "anubis-messenger.firebaseapp.com",
+    projectId: "anubis-messenger",
+    storageBucket: "anubis-messenger.appspot.com",
+    messagingSenderId: "123456789012",
+    appId: "1:123456789012:web:abcdef1234567890"
 };
 
 // Инициализация Firebase
 firebase.initializeApp(firebaseConfig);
 
-// Экспорт сервисов
+// Ссылки на сервисы
 const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
-const messaging = firebase.messaging();
 
-// Настройка Firestore
-const serversCollection = db.collection('servers');
-const channelsCollection = db.collection('channels');
-const messagesCollection = db.collection('messages');
+// Коллекции
 const usersCollection = db.collection('users');
+const serversCollection = db.collection('servers');
+const messagesCollection = db.collection('messages');
 
-// Функции для работы с Firebase
+// Объект для работы с Firebase
 const firebaseApp = {
-    // Аутентификация
-    async login(email, password) {
+    // Проверка доступности ника
+    async checkUsernameAvailability(username) {
         try {
-            const userCredential = await auth.signInWithEmailAndPassword(email, password);
-            return { success: true, user: userCredential.user };
+            const snapshot = await usersCollection
+                .where('username', '==', username.toLowerCase())
+                .limit(1)
+                .get();
+            
+            return {
+                available: snapshot.empty,
+                message: snapshot.empty ? 'Ник свободен' : 'Ник уже занят'
+            };
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error('Error checking username:', error);
+            return { available: false, message: 'Ошибка проверки' };
         }
     },
 
-    async register(email, password, username, avatar) {
+    // Проверка доступности email
+    async checkEmailAvailability(email) {
         try {
-            // Создаем пользователя
+            const snapshot = await usersCollection
+                .where('email', '==', email.toLowerCase())
+                .limit(1)
+                .get();
+            
+            return {
+                available: snapshot.empty,
+                message: snapshot.empty ? 'Email свободен' : 'Email уже используется'
+            };
+        } catch (error) {
+            console.error('Error checking email:', error);
+            return { available: false, message: 'Ошибка проверки' };
+        }
+    },
+
+    // Регистрация пользователя
+    async registerUser(username, email, password) {
+        try {
+            // Проверяем ник и email
+            const usernameCheck = await this.checkUsernameAvailability(username);
+            const emailCheck = await this.checkEmailAvailability(email);
+            
+            if (!usernameCheck.available) {
+                return { success: false, error: 'Этот ник уже занят' };
+            }
+            
+            if (!emailCheck.available) {
+                return { success: false, error: 'Этот email уже используется' };
+            }
+            
+            // Создаем пользователя в Firebase Auth
             const userCredential = await auth.createUserWithEmailAndPassword(email, password);
             const user = userCredential.user;
             
-            // Сохраняем дополнительные данные
+            // Сохраняем дополнительные данные в Firestore
             await usersCollection.doc(user.uid).set({
                 uid: user.uid,
-                email: user.email,
-                username: username || user.email.split('@')[0],
-                avatar: avatar || `https://ui-avatars.com/api/?name=${username}&background=5865f2&color=fff`,
+                username: username.toLowerCase(),
+                displayName: username,
+                email: email.toLowerCase(),
+                avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=7289da&color=fff`,
                 status: 'online',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+                servers: []
+            });
+            
+            // Создаем домашний сервер для пользователя
+            await this.createHomeServer(user.uid, username);
+            
+            return { 
+                success: true, 
+                user: user,
+                message: 'Регистрация прошла успешно!' 
+            };
+            
+        } catch (error) {
+            console.error('Registration error:', error);
+            
+            let errorMessage = 'Ошибка регистрации';
+            
+            switch(error.code) {
+                case 'auth/email-already-in-use':
+                    errorMessage = 'Этот email уже используется';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Неверный формат email';
+                    break;
+                case 'auth/operation-not-allowed':
+                    errorMessage = 'Регистрация временно отключена';
+                    break;
+                case 'auth/weak-password':
+                    errorMessage = 'Пароль слишком слабый';
+                    break;
+            }
+            
+            return { success: false, error: errorMessage };
+        }
+    },
+
+    // Создание домашнего сервера
+    async createHomeServer(userId, username) {
+        try {
+            const serverData = {
+                name: `${username}'s Server`,
+                ownerId: userId,
+                members: [userId],
+                channels: ['general', 'chat', 'voice'],
+                createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            const serverRef = await serversCollection.add(serverData);
+            
+            // Обновляем список серверов пользователя
+            await usersCollection.doc(userId).update({
+                servers: firebase.firestore.FieldValue.arrayUnion(serverRef.id)
+            });
+            
+            // Создаем каналы
+            await this.createChannel(serverRef.id, 'general', 'text', userId);
+            await this.createChannel(serverRef.id, 'chat', 'text', userId);
+            await this.createChannel(serverRef.id, 'Voice Chat', 'voice', userId);
+            
+            return serverRef.id;
+            
+        } catch (error) {
+            console.error('Error creating home server:', error);
+        }
+    },
+
+    // Создание канала
+    async createChannel(serverId, name, type, creatorId) {
+        try {
+            const channelData = {
+                serverId: serverId,
+                name: name,
+                type: type,
+                creatorId: creatorId,
+                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                topic: type === 'text' ? 'Добро пожаловать!' : 'Голосовой канал'
+            };
+            
+            const channelsCollection = db.collection('channels');
+            await channelsCollection.add(channelData);
+            
+        } catch (error) {
+            console.error('Error creating channel:', error);
+        }
+    },
+
+    // Вход пользователя
+    async loginUser(username, password) {
+        try {
+            // Сначала находим пользователя по никнейму
+            const snapshot = await usersCollection
+                .where('username', '==', username.toLowerCase())
+                .limit(1)
+                .get();
+            
+            if (snapshot.empty) {
+                return { success: false, error: 'Пользователь не найден' };
+            }
+            
+            const userDoc = snapshot.docs[0];
+            const userData = userDoc.data();
+            const email = userData.email;
+            
+            // Пытаемся войти с email и паролем
+            const userCredential = await auth.signInWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            // Обновляем статус пользователя
+            await usersCollection.doc(user.uid).update({
+                status: 'online',
                 lastSeen: firebase.firestore.FieldValue.serverTimestamp()
             });
             
-            return { success: true, user };
+            return { 
+                success: true, 
+                user: user,
+                userData: userData,
+                message: 'Вход выполнен успешно!' 
+            };
+            
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error('Login error:', error);
+            
+            let errorMessage = 'Ошибка входа';
+            
+            switch(error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'Пользователь не найден';
+                    break;
+                case 'auth/wrong-password':
+                    errorMessage = 'Неверный пароль';
+                    break;
+                case 'auth/invalid-email':
+                    errorMessage = 'Неверный формат email';
+                    break;
+                case 'auth/user-disabled':
+                    errorMessage = 'Аккаунт отключен';
+                    break;
+            }
+            
+            return { success: false, error: errorMessage };
         }
     },
 
-    async loginWithGoogle() {
+    // Получение данных пользователя
+    async getUserData(userId) {
         try {
-            const provider = new firebase.auth.GoogleAuthProvider();
-            const userCredential = await auth.signInWithPopup(provider);
-            return { success: true, user: userCredential.user };
+            const doc = await usersCollection.doc(userId).get();
+            return doc.exists ? doc.data() : null;
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error('Error getting user data:', error);
+            return null;
         }
     },
 
-    async loginWithGithub() {
+    // Получение серверов пользователя
+    async getUserServers(userId) {
         try {
-            const provider = new firebase.auth.GithubAuthProvider();
-            const userCredential = await auth.signInWithPopup(provider);
-            return { success: true, user: userCredential.user };
+            const userDoc = await usersCollection.doc(userId).get();
+            if (!userDoc.exists) return [];
+            
+            const userData = userDoc.data();
+            const serverIds = userData.servers || [];
+            
+            if (serverIds.length === 0) return [];
+            
+            const servers = [];
+            for (const serverId of serverIds) {
+                const serverDoc = await serversCollection.doc(serverId).get();
+                if (serverDoc.exists) {
+                    servers.push({ id: serverId, ...serverDoc.data() });
+                }
+            }
+            
+            return servers;
+            
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error('Error getting user servers:', error);
+            return [];
         }
     },
 
-    async logout() {
+    // Создание нового сервера
+    async createServer(name, ownerId, icon = null) {
         try {
-            await auth.signOut();
-            return { success: true };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
-    },
-
-    // Серверы
-    async createServer(name, icon, ownerId) {
-        try {
-            const serverRef = await serversCollection.add({
+            const serverData = {
                 name: name,
-                icon: icon || `https://ui-avatars.com/api/?name=${name}&background=5865f2&color=fff`,
                 ownerId: ownerId,
                 members: [ownerId],
+                icon: icon || `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=7289da&color=fff`,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            
+            const serverRef = await serversCollection.add(serverData);
+            
+            // Обновляем список серверов пользователя
+            await usersCollection.doc(ownerId).update({
+                servers: firebase.firestore.FieldValue.arrayUnion(serverRef.id)
             });
             
             // Создаем общий канал
             await this.createChannel(serverRef.id, 'general', 'text', ownerId);
             
             return { success: true, serverId: serverRef.id };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
-    },
-
-    async getServers(userId) {
-        try {
-            const snapshot = await serversCollection
-                .where('members', 'array-contains', userId)
-                .orderBy('createdAt', 'desc')
-                .get();
             
-            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         } catch (error) {
-            console.error('Error getting servers:', error);
-            return [];
+            console.error('Error creating server:', error);
+            return { success: false, error: 'Ошибка создания сервера' };
         }
     },
 
-    // Каналы
-    async createChannel(serverId, name, type, creatorId) {
+    // Отправка сообщения
+    async sendMessage(channelId, userId, content) {
         try {
-            const channelRef = await channelsCollection.add({
-                serverId: serverId,
-                name: name,
-                type: type,
-                creatorId: creatorId,
-                createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                topic: type === 'text' ? 'Добро пожаловать в новый канал!' : ''
-            });
-            
-            return { success: true, channelId: channelRef.id };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
-    },
-
-    async getChannels(serverId) {
-        try {
-            const snapshot = await channelsCollection
-                .where('serverId', '==', serverId)
-                .orderBy('createdAt')
-                .get();
-            
-            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        } catch (error) {
-            console.error('Error getting channels:', error);
-            return [];
-        }
-    },
-
-    // Сообщения
-    async sendMessage(channelId, userId, content, attachments = []) {
-        try {
-            const messageRef = await messagesCollection.add({
+            const messageData = {
                 channelId: channelId,
                 userId: userId,
                 content: content,
-                attachments: attachments,
                 timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-                edited: false,
-                reactions: {}
-            });
+                edited: false
+            };
             
-            return { success: true, messageId: messageRef.id };
+            await messagesCollection.add(messageData);
+            return { success: true };
+            
         } catch (error) {
-            return { success: false, error: error.message };
+            console.error('Error sending message:', error);
+            return { success: false, error: 'Ошибка отправки сообщения' };
         }
     },
 
+    // Получение сообщений
     async getMessages(channelId, limit = 50) {
         try {
             const snapshot = await messagesCollection
@@ -180,45 +327,54 @@ const firebaseApp = {
                 .limit(limit)
                 .get();
             
-            return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const messages = [];
+            snapshot.forEach(doc => {
+                messages.push({ id: doc.id, ...doc.data() });
+            });
+            
+            return messages.reverse(); // Возвращаем в правильном порядке
+            
         } catch (error) {
             console.error('Error getting messages:', error);
             return [];
         }
     },
 
-    // Реальное время - слушатели
-    onAuthStateChanged(callback) {
-        return auth.onAuthStateChanged(callback);
-    },
-
+    // Слушатель сообщений в реальном времени
     onMessages(channelId, callback) {
         return messagesCollection
             .where('channelId', '==', channelId)
             .orderBy('timestamp')
             .onSnapshot(snapshot => {
-                const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                const messages = [];
+                snapshot.forEach(doc => {
+                    messages.push({ id: doc.id, ...doc.data() });
+                });
                 callback(messages);
             });
     },
 
-    onUsersPresence(callback) {
-        return usersCollection.onSnapshot(snapshot => {
-            const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            callback(users);
-        });
+    // Выход из системы
+    async logoutUser(userId) {
+        try {
+            if (userId) {
+                await usersCollection.doc(userId).update({
+                    status: 'offline',
+                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            
+            await auth.signOut();
+            return { success: true };
+            
+        } catch (error) {
+            console.error('Logout error:', error);
+            return { success: false, error: 'Ошибка выхода' };
+        }
     },
 
-    // Обновление статуса пользователя
-    async updateUserStatus(userId, status) {
-        try {
-            await usersCollection.doc(userId).update({
-                status: status,
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            return { success: true };
-        } catch (error) {
-            return { success: false, error: error.message };
-        }
+    // Слушатель состояния аутентификации
+    onAuthStateChanged(callback) {
+        return auth.onAuthStateChanged(callback);
     }
 };
