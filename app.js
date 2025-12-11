@@ -1,164 +1,401 @@
 // Состояние приложения
 let state = {
     currentUser: null,
+    currentUserData: null,
     currentServer: null,
-    currentChannel: null,
+    currentChannel: 'general',
     servers: [],
-    channels: [],
     messages: [],
     users: [],
     onlineUsers: new Set()
 };
 
 // DOM элементы
-const authModal = document.getElementById('auth-modal');
-const mainApp = document.getElementById('main-app');
-const messageInput = document.getElementById('message-input');
-const messagesContainer = document.getElementById('messages-container');
+const authContainer = document.getElementById('auth-container');
+const appContainer = document.getElementById('app-container');
+const loginForm = document.getElementById('login-form');
+const registerForm = document.getElementById('register-form');
+const loginTab = document.getElementById('login-tab');
+const registerTab = document.getElementById('register-tab');
 
 // Инициализация приложения
-document.addEventListener('DOMContentLoaded', async () => {
-    // Проверяем аутентификацию
-    firebaseApp.onAuthStateChanged(async (user) => {
-        if (user) {
-            state.currentUser = user;
-            await loadUserData(user.uid);
-            showMainApp();
-            setupRealtimeListeners();
-        } else {
-            showAuthModal();
-        }
-    });
+document.addEventListener('DOMContentLoaded', function() {
+    initApp();
 });
 
-// Показать модальное окно аутентификации
-function showAuthModal() {
-    authModal.style.display = 'flex';
-    mainApp.style.display = 'none';
+async function initApp() {
+    // Проверяем состояние аутентификации
+    firebaseApp.onAuthStateChanged(async (user) => {
+        if (user) {
+            // Пользователь вошел в систему
+            state.currentUser = user;
+            await loadUserData(user.uid);
+            showApp();
+        } else {
+            // Пользователь не авторизован
+            showAuth();
+        }
+    });
+    
+    // Настройка обработчиков событий
+    setupEventListeners();
+    
+    // Настройка проверки формы регистрации
+    setupRegistrationValidation();
 }
 
-function closeAuthModal() {
-    authModal.style.display = 'none';
+// Настройка обработчиков событий
+function setupEventListeners() {
+    // Переключение между вкладками входа и регистрации
+    loginTab.addEventListener('click', () => switchAuthTab('login'));
+    registerTab.addEventListener('click', () => switchAuthTab('register'));
+    
+    // Обработка формы входа
+    loginForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await login();
+    });
+    
+    // Обработка формы регистрации
+    registerForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await register();
+    });
+    
+    // Забыли пароль
+    document.getElementById('forgot-password').addEventListener('click', (e) => {
+        e.preventDefault();
+        forgotPassword();
+    });
 }
 
-function switchTab(tab) {
-    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-    document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
-    document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
-    document.querySelector(`[onclick="switchTab('${tab}')"]`).classList.add('active');
+// Настройка валидации формы регистрации
+function setupRegistrationValidation() {
+    const usernameInput = document.getElementById('register-username');
+    const emailInput = document.getElementById('register-email');
+    const passwordInput = document.getElementById('register-password');
+    const confirmInput = document.getElementById('register-confirm');
+    const usernameCheck = document.getElementById('username-check');
+    const emailCheck = document.getElementById('email-check');
+    const usernameHint = document.getElementById('username-hint');
+    const emailHint = document.getElementById('email-hint');
+    const confirmHint = document.getElementById('confirm-hint');
+    const strengthText = document.getElementById('password-strength-text');
+    const strengthBar = document.querySelector('.strength-bar');
+    const registerBtn = document.getElementById('register-btn');
+    
+    let usernameValid = false;
+    let emailValid = false;
+    let passwordValid = false;
+    let confirmValid = false;
+    
+    // Проверка ника при вводе
+    usernameInput.addEventListener('input', async () => {
+        const username = usernameInput.value.trim();
+        
+        if (username.length < 3) {
+            usernameCheck.className = 'check-icon';
+            usernameHint.className = 'hint invalid';
+            usernameHint.textContent = 'Минимум 3 символа';
+            usernameValid = false;
+            updateRegisterButton();
+            return;
+        }
+        
+        if (username.length > 20) {
+            usernameCheck.className = 'check-icon taken';
+            usernameHint.className = 'hint invalid';
+            usernameHint.textContent = 'Максимум 20 символов';
+            usernameValid = false;
+            updateRegisterButton();
+            return;
+        }
+        
+        // Проверка допустимых символов
+        const validChars = /^[a-zA-Z0-9_-]+$/;
+        if (!validChars.test(username)) {
+            usernameCheck.className = 'check-icon taken';
+            usernameHint.className = 'hint invalid';
+            usernameHint.textContent = 'Только буквы, цифры, _ и -';
+            usernameValid = false;
+            updateRegisterButton();
+            return;
+        }
+        
+        // Проверка доступности ника
+        const result = await firebaseApp.checkUsernameAvailability(username);
+        
+        if (result.available) {
+            usernameCheck.className = 'check-icon available';
+            usernameHint.className = 'hint valid';
+            usernameValid = true;
+        } else {
+            usernameCheck.className = 'check-icon taken';
+            usernameHint.className = 'hint invalid';
+            usernameValid = false;
+        }
+        
+        usernameHint.textContent = result.message;
+        updateRegisterButton();
+    });
+    
+    // Проверка email при вводе
+    emailInput.addEventListener('input', async () => {
+        const email = emailInput.value.trim();
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        
+        if (!emailRegex.test(email)) {
+            emailCheck.className = 'check-icon';
+            emailHint.className = 'hint invalid';
+            emailHint.textContent = 'Неверный формат email';
+            emailValid = false;
+            updateRegisterButton();
+            return;
+        }
+        
+        // Проверка доступности email
+        const result = await firebaseApp.checkEmailAvailability(email);
+        
+        if (result.available) {
+            emailCheck.className = 'check-icon available';
+            emailHint.className = 'hint valid';
+            emailValid = true;
+        } else {
+            emailCheck.className = 'check-icon taken';
+            emailHint.className = 'hint invalid';
+            emailValid = false;
+        }
+        
+        emailHint.textContent = result.message;
+        updateRegisterButton();
+    });
+    
+    // Проверка сложности пароля
+    passwordInput.addEventListener('input', () => {
+        const password = passwordInput.value;
+        
+        // Оценка сложности пароля
+        let strength = 0;
+        let message = 'Очень слабый';
+        let color = '#ed4245';
+        
+        if (password.length >= 6) strength++;
+        if (password.length >= 8) strength++;
+        if (/[A-Z]/.test(password)) strength++;
+        if (/[0-9]/.test(password)) strength++;
+        if (/[^A-Za-z0-9]/.test(password)) strength++;
+        
+        switch(strength) {
+            case 0:
+            case 1:
+                message = 'Очень слабый';
+                color = '#ed4245';
+                break;
+            case 2:
+                message = 'Слабый';
+                color = '#faa81a';
+                break;
+            case 3:
+                message = 'Средний';
+                color = '#faa81a';
+                break;
+            case 4:
+                message = 'Хороший';
+                color = '#3ba55c';
+                break;
+            case 5:
+                message = 'Отличный';
+                color = '#3ba55c';
+                break;
+        }
+        
+        // Обновляем UI
+        strengthBar.style.width = (strength * 20) + '%';
+        strengthBar.style.backgroundColor = color;
+        strengthText.textContent = message;
+        strengthText.style.color = color;
+        
+        passwordValid = password.length >= 6;
+        updateRegisterButton();
+        
+        // Проверка совпадения паролей
+        if (confirmInput.value) {
+            validatePasswordMatch();
+        }
+    });
+    
+    // Проверка совпадения паролей
+    confirmInput.addEventListener('input', validatePasswordMatch);
+    
+    function validatePasswordMatch() {
+        const password = passwordInput.value;
+        const confirm = confirmInput.value;
+        
+        if (!confirm) {
+            confirmHint.className = 'hint';
+            confirmHint.textContent = '';
+            confirmValid = false;
+            updateRegisterButton();
+            return;
+        }
+        
+        if (password === confirm) {
+            confirmHint.className = 'hint valid';
+            confirmHint.textContent = 'Пароли совпадают';
+            confirmValid = true;
+        } else {
+            confirmHint.className = 'hint invalid';
+            confirmHint.textContent = 'Пароли не совпадают';
+            confirmValid = false;
+        }
+        
+        updateRegisterButton();
+    }
+    
+    function updateRegisterButton() {
+        registerBtn.disabled = !(usernameValid && emailValid && passwordValid && confirmValid);
+    }
 }
 
-// Аутентификация
+// Переключение между вкладками входа и регистрации
+function switchAuthTab(tab) {
+    loginTab.classList.remove('active');
+    registerTab.classList.remove('active');
+    loginForm.classList.remove('active');
+    registerForm.classList.remove('active');
+    
+    if (tab === 'login') {
+        loginTab.classList.add('active');
+        loginForm.classList.add('active');
+    } else {
+        registerTab.classList.add('active');
+        registerForm.classList.add('active');
+    }
+}
+
+// Вход в систему
 async function login() {
-    const email = document.getElementById('login-email').value;
+    const username = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
     
-    if (!email || !password) {
-        showNotification('Введите email и пароль', 'error');
+    if (!username || !password) {
+        showNotification('Заполните все поля', 'error');
         return;
     }
     
-    const result = await firebaseApp.login(email, password);
+    const result = await firebaseApp.loginUser(username, password);
+    
     if (result.success) {
-        showNotification('Вход выполнен успешно!', 'success');
-        closeAuthModal();
+        showNotification(result.message, 'success');
+        // Приложение автоматически переключится через onAuthStateChanged
     } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
+        showNotification(result.error, 'error');
     }
 }
 
+// Регистрация
 async function register() {
-    const username = document.getElementById('register-username').value;
-    const email = document.getElementById('register-email').value;
+    const username = document.getElementById('register-username').value.trim();
+    const email = document.getElementById('register-email').value.trim();
     const password = document.getElementById('register-password').value;
-    const avatar = document.getElementById('register-avatar').value;
     
-    if (!email || !password || !username) {
-        showNotification('Заполните все обязательные поля', 'error');
+    if (!username || !email || !password) {
+        showNotification('Заполните все поля', 'error');
         return;
     }
     
-    if (password.length < 6) {
-        showNotification('Пароль должен быть не менее 6 символов', 'error');
-        return;
-    }
+    const result = await firebaseApp.registerUser(username, email, password);
     
-    const result = await firebaseApp.register(email, password, username, avatar);
     if (result.success) {
-        showNotification('Регистрация прошла успешно!', 'success');
-        switchTab('login');
+        showNotification(result.message, 'success');
+        // Очищаем форму регистрации
+        document.getElementById('register-form').reset();
+        switchAuthTab('login');
     } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
+        showNotification(result.error, 'error');
     }
 }
 
-async function loginWithGoogle() {
-    const result = await firebaseApp.loginWithGoogle();
-    if (result.success) {
-        showNotification('Вход через Google выполнен!', 'success');
-        closeAuthModal();
-    } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
-    }
-}
-
-async function loginWithGithub() {
-    const result = await firebaseApp.loginWithGithub();
-    if (result.success) {
-        showNotification('Вход через GitHub выполнен!', 'success');
-        closeAuthModal();
-    } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
-    }
-}
-
-async function logout() {
-    await firebaseApp.updateUserStatus(state.currentUser.uid, 'offline');
-    const result = await firebaseApp.logout();
-    if (result.success) {
-        showNotification('Вы вышли из системы', 'info');
-        showAuthModal();
+// Забыли пароль
+async function forgotPassword() {
+    const email = prompt('Введите ваш email для восстановления пароля:');
+    
+    if (!email) return;
+    
+    try {
+        await auth.sendPasswordResetEmail(email);
+        showNotification('Инструкции по восстановлению отправлены на email', 'success');
+    } catch (error) {
+        showNotification('Ошибка отправки email восстановления', 'error');
     }
 }
 
 // Загрузка данных пользователя
 async function loadUserData(userId) {
     try {
+        // Загружаем данные пользователя
+        state.currentUserData = await firebaseApp.getUserData(userId);
+        
+        if (!state.currentUserData) {
+            await firebaseApp.logoutUser(userId);
+            return;
+        }
+        
+        // Сохраняем данные в localStorage
+        localStorage.setItem('username', state.currentUserData.displayName);
+        localStorage.setItem('avatar', state.currentUserData.avatar);
+        
+        // Обновляем UI
+        updateUserUI();
+        
         // Загружаем серверы пользователя
-        state.servers = await firebaseApp.getServers(userId);
+        state.servers = await firebaseApp.getUserServers(userId);
         renderServers();
         
         // Если есть серверы, загружаем первый
         if (state.servers.length > 0) {
-            await switchServer(state.servers[0].id);
-        } else {
-            // Создаем демо-сервер для нового пользователя
-            const result = await firebaseApp.createServer(
-                'Мой сервер',
-                null,
-                userId
-            );
-            
-            if (result.success) {
-                state.servers = await firebaseApp.getServers(userId);
-                renderServers();
-                await switchServer(state.servers[0].id);
-            }
+            await switchServer(state.servers[0]);
         }
         
-        // Обновляем статус пользователя
-        await firebaseApp.updateUserStatus(userId, 'online');
     } catch (error) {
         console.error('Error loading user data:', error);
         showNotification('Ошибка загрузки данных', 'error');
     }
 }
 
-// Показать основной интерфейс
-function showMainApp() {
-    authModal.style.display = 'none';
-    mainApp.style.display = 'flex';
-    renderCurrentUser();
+// Обновление UI пользователя
+function updateUserUI() {
+    const usernameElement = document.getElementById('current-username');
+    const avatarElement = document.getElementById('user-avatar');
+    
+    if (state.currentUserData) {
+        usernameElement.textContent = state.currentUserData.displayName;
+        avatarElement.textContent = state.currentUserData.displayName.charAt(0).toUpperCase();
+        avatarElement.style.background = '#7289da';
+    }
+}
+
+// Показать экран аутентификации
+function showAuth() {
+    authContainer.style.display = 'flex';
+    appContainer.style.display = 'none';
+    
+    // Очищаем форму входа
+    document.getElementById('login-form').reset();
+    
+    // Переключаемся на вкладку входа
+    switchAuthTab('login');
+}
+
+// Показать основное приложение
+function showApp() {
+    authContainer.style.display = 'none';
+    appContainer.style.display = 'flex';
+    
+    // Фокус на поле ввода сообщения
+    setTimeout(() => {
+        document.getElementById('message-input').focus();
+    }, 100);
 }
 
 // Рендер серверов
@@ -168,221 +405,257 @@ function renderServers() {
     
     state.servers.forEach(server => {
         const serverElement = document.createElement('div');
-        serverElement.className = `server-item ${state.currentServer?.id === server.id ? 'active' : ''}`;
-        serverElement.innerHTML = server.icon 
-            ? `<img src="${server.icon}" alt="${server.name}" style="width: 100%; height: 100%; border-radius: inherit;">`
-            : `<span>${server.name.charAt(0)}</span>`;
-        serverElement.title = server.name;
-        serverElement.onclick = () => switchServer(server.id);
+        serverElement.className = 'server-item';
+        serverElement.innerHTML = `
+            <div class="server-icon">
+                ${server.icon ? `<img src="${server.icon}" alt="${server.name}" style="width: 100%; height: 100%; border-radius: inherit;">` : server.name.charAt(0)}
+            </div>
+            <div class="server-tooltip">${server.name}</div>
+        `;
+        
+        serverElement.addEventListener('click', () => switchServer(server));
         serversList.appendChild(serverElement);
     });
 }
 
-// Рендер текущего пользователя
-function renderCurrentUser() {
-    const userInfo = document.getElementById('current-user-info');
-    userInfo.innerHTML = `
-        <div class="user-avatar" style="background-color: #5865f2;">
-            <span>${state.currentUser?.email?.charAt(0).toUpperCase() || 'U'}</span>
-        </div>
-        <div class="user-details">
-            <div class="user-name">${state.currentUser?.displayName || state.currentUser?.email?.split('@')[0] || 'Пользователь'}</div>
-            <div class="user-status">Онлайн</div>
-        </div>
-    `;
-}
-
 // Переключение сервера
-async function switchServer(serverId) {
-    const server = state.servers.find(s => s.id === serverId);
-    if (!server) return;
-    
+async function switchServer(server) {
     state.currentServer = server;
     document.getElementById('server-name').textContent = server.name;
     
-    // Загружаем каналы
-    state.channels = await firebaseApp.getChannels(serverId);
-    renderChannels();
-    
-    // Переключаемся на первый канал
-    if (state.channels.length > 0) {
-        await switchChannel(state.channels[0].id);
-    }
-    
-    renderServers();
-}
-
-// Рендер каналов
-function renderChannels() {
-    const textChannelsList = document.getElementById('text-channels-list');
-    const voiceChannelsList = document.getElementById('voice-channels-list');
-    
-    textChannelsList.innerHTML = '';
-    voiceChannelsList.innerHTML = '';
-    
-    state.channels.forEach(channel => {
-        const channelElement = document.createElement('div');
-        channelElement.className = `channel-item ${state.currentChannel?.id === channel.id ? 'active' : ''}`;
-        channelElement.innerHTML = `
-            <i class="fas fa-${channel.type === 'voice' ? 'phone-alt' : 'hashtag'}"></i>
-            <span>${channel.name}</span>
-        `;
-        channelElement.onclick = () => switchChannel(channel.id);
-        
-        if (channel.type === 'text') {
-            textChannelsList.appendChild(channelElement);
-        } else {
-            voiceChannelsList.appendChild(channelElement);
-        }
+    // Обновляем активный сервер в UI
+    document.querySelectorAll('.server-item').forEach(item => {
+        item.classList.remove('active');
     });
+    
+    event.currentTarget.classList.add('active');
+    
+    // Загружаем сообщения для общего канала
+    await loadMessages('general');
 }
 
-// Переключение канала
-async function switchChannel(channelId) {
-    const channel = state.channels.find(c => c.id === channelId);
-    if (!channel) return;
-    
-    state.currentChannel = channel;
-    document.getElementById('current-channel-name').textContent = channel.name;
-    
-    // Очищаем старые слушатели
-    if (state.unsubscribeMessages) {
-        state.unsubscribeMessages();
-    }
+// Загрузка сообщений
+async function loadMessages(channelName) {
+    state.currentChannel = channelName;
+    document.getElementById('current-channel').textContent = channelName;
     
     // Загружаем сообщения
-    state.messages = await firebaseApp.getMessages(channelId);
+    state.messages = await firebaseApp.getMessages(channelName);
     renderMessages();
     
-    // Подписываемся на новые сообщения в реальном времени
-    state.unsubscribeMessages = firebaseApp.onMessages(channelId, (messages) => {
-        state.messages = messages;
-        renderMessages();
-        
-        // Воспроизводим звук для новых сообщений
-        if (messages.length > state.messages.length) {
-            playMessageSound();
-            showNotification('Новое сообщение', 'info');
-        }
-    });
-    
-    renderChannels();
-    messageInput.focus();
+    // Настраиваем реальное время для этого канала
+    setupRealtimeMessages(channelName);
 }
 
 // Рендер сообщений
 function renderMessages() {
-    messagesContainer.innerHTML = '';
+    const container = document.getElementById('messages-container');
     
     if (state.messages.length === 0) {
-        messagesContainer.innerHTML = `
+        container.innerHTML = `
             <div class="welcome-message">
-                <h1>Добро пожаловать в #${state.currentChannel?.name || 'general'}!</h1>
-                <p>Это начало канала. Начните общение, отправив сообщение ниже.</p>
+                <h1>Добро пожаловать в #${state.currentChannel}!</h1>
+                <p>Это начало канала. Отправьте сообщение, чтобы начать общение.</p>
             </div>
         `;
         return;
     }
     
+    container.innerHTML = '';
+    
     state.messages.forEach(message => {
         const messageElement = createMessageElement(message);
-        messagesContainer.appendChild(messageElement);
+        container.appendChild(messageElement);
     });
     
     // Прокручиваем вниз
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    container.scrollTop = container.scrollHeight;
 }
 
+// Создание элемента сообщения
 function createMessageElement(message) {
     const element = document.createElement('div');
     element.className = 'message';
     
-    // Форматируем время
-    const time = message.timestamp?.toDate 
-        ? formatTime(message.timestamp.toDate())
-        : 'Только что';
+    const time = message.timestamp ? 
+        new Date(message.timestamp.seconds * 1000).toLocaleTimeString('ru-RU', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        }) : 'Только что';
+    
+    // Получаем имя пользователя
+    const username = state.currentUserData?.displayName || 'Пользователь';
+    const firstLetter = username.charAt(0).toUpperCase();
     
     element.innerHTML = `
-        <div class="message-avatar">
-            <span>${message.userId?.charAt(0).toUpperCase() || 'U'}</span>
-        </div>
+        <div class="message-avatar">${firstLetter}</div>
         <div class="message-content">
             <div class="message-header">
-                <span class="message-author">${message.userId || 'Аноним'}</span>
+                <span class="message-author">${username}</span>
                 <span class="message-time">${time}</span>
             </div>
             <div class="message-text">${escapeHtml(message.content)}</div>
-            ${message.attachments?.length > 0 ? renderAttachments(message.attachments) : ''}
-            <div class="message-actions">
-                <button class="message-action-btn" onclick="reactToMessage('${message.id}', '👍')">👍</button>
-                <button class="message-action-btn" onclick="replyToMessage('${message.id}')">Ответить</button>
-                ${message.userId === state.currentUser?.uid ? 
-                    `<button class="message-action-btn" onclick="editMessage('${message.id}')">✏️</button>
-                     <button class="message-action-btn" onclick="deleteMessage('${message.id}')">🗑️</button>` : ''}
-            </div>
         </div>
     `;
     
     return element;
 }
 
-function renderAttachments(attachments) {
-    return attachments.map(att => `
-        <div class="attachment">
-            <img src="${att.url}" alt="${att.name}" style="max-width: 200px; border-radius: 4px;">
-        </div>
-    `).join('');
+// Настройка реального времени для сообщений
+function setupRealtimeMessages(channelName) {
+    // Здесь можно добавить подписку на реальное время
+    // Для простоты используем периодическую проверку
+    setInterval(async () => {
+        const newMessages = await firebaseApp.getMessages(channelName);
+        if (newMessages.length !== state.messages.length) {
+            state.messages = newMessages;
+            renderMessages();
+            
+            // Воспроизводим звук для новых сообщений
+            if (newMessages.length > state.messages.length) {
+                playMessageSound();
+            }
+        }
+    }, 3000);
 }
 
 // Отправка сообщения
 async function sendMessage() {
-    const content = messageInput.value.trim();
+    const input = document.getElementById('message-input');
+    const content = input.value.trim();
+    
     if (!content || !state.currentChannel || !state.currentUser) return;
     
     const result = await firebaseApp.sendMessage(
-        state.currentChannel.id,
+        state.currentChannel,
         state.currentUser.uid,
         content
     );
     
     if (result.success) {
-        messageInput.value = '';
-        messageInput.style.height = 'auto';
+        input.value = '';
+        input.style.height = 'auto';
+        
+        // Добавляем сообщение локально для мгновенного отображения
+        const newMessage = {
+            content: content,
+            userId: state.currentUser.uid,
+            timestamp: { seconds: Date.now() / 1000 }
+        };
+        
+        state.messages.push(newMessage);
+        renderMessages();
+        
     } else {
-        showNotification(`Ошибка отправки: ${result.error}`, 'error');
+        showNotification('Ошибка отправки сообщения', 'error');
     }
 }
 
-function handleMessageKeydown(event) {
+// Обработка нажатия клавиш в поле ввода
+function handleInputKeydown(event) {
     if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         sendMessage();
     }
     
-    // Авто-высота textarea
+    // Автоматическое изменение высоты textarea
     this.style.height = 'auto';
     this.style.height = (this.scrollHeight) + 'px';
 }
 
-// Утилиты
-function formatTime(date) {
-    const now = new Date();
-    const diff = now - date;
+// Показать модальное окно создания сервера
+function showCreateServerModal() {
+    document.getElementById('server-title').value = '';
+    document.getElementById('server-icon').value = '';
+    document.getElementById('modal-overlay').style.display = 'flex';
+    document.getElementById('create-server-modal').style.display = 'block';
+}
+
+// Создание сервера
+async function createServer() {
+    const name = document.getElementById('server-title').value.trim();
     
-    if (diff < 60000) return 'Только что';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)} мин назад`;
-    if (diff < 86400000) return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-    return date.toLocaleDateString('ru-RU');
+    if (!name) {
+        showNotification('Введите название сервера', 'error');
+        return;
+    }
+    
+    const icon = document.getElementById('server-icon').value.trim() || null;
+    
+    const result = await firebaseApp.createServer(
+        name,
+        state.currentUser.uid,
+        icon
+    );
+    
+    if (result.success) {
+        closeModal();
+        showNotification('Сервер создан успешно!', 'success');
+        
+        // Обновляем список серверов
+        state.servers = await firebaseApp.getUserServers(state.currentUser.uid);
+        renderServers();
+        
+    } else {
+        showNotification(result.error, 'error');
+    }
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML.replace(/\n/g, '<br>');
+// Закрыть модальное окно
+function closeModal() {
+    document.getElementById('modal-overlay').style.display = 'none';
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.style.display = 'none';
+    });
 }
 
+// Показать профиль
+function showProfileModal() {
+    if (!state.currentUserData) return;
+    
+    document.getElementById('profile-username').value = state.currentUserData.displayName;
+    document.getElementById('profile-email').value = state.currentUserData.email;
+    document.getElementById('profile-status').value = state.currentUserData.status || 'online';
+    
+    document.getElementById('modal-overlay').style.display = 'flex';
+    document.getElementById('profile-modal').style.display = 'block';
+}
+
+// Обновление профиля
+async function updateProfile() {
+    const status = document.getElementById('profile-status').value;
+    
+    try {
+        await usersCollection.doc(state.currentUser.uid).update({
+            status: status
+        });
+        
+        state.currentUserData.status = status;
+        closeModal();
+        showNotification('Профиль обновлен', 'success');
+        
+    } catch (error) {
+        showNotification('Ошибка обновления профиля', 'error');
+    }
+}
+
+// Выход из системы
+async function logout() {
+    const result = await firebaseApp.logoutUser(state.currentUser.uid);
+    
+    if (result.success) {
+        closeModal();
+        showAuth();
+        showNotification('Вы вышли из системы', 'info');
+    } else {
+        showNotification(result.error, 'error');
+    }
+}
+
+// Показать уведомление
 function showNotification(message, type = 'info') {
     const container = document.getElementById('notifications-container');
+    
     const notification = document.createElement('div');
     notification.className = 'notification';
     
@@ -394,7 +667,7 @@ function showNotification(message, type = 'info') {
     };
     
     notification.innerHTML = `
-        <div class="notification-icon" style="background-color: ${type === 'success' ? '#3ba55c' : type === 'error' ? '#ed4245' : '#5865f2'}">
+        <div class="notification-icon" style="background-color: ${type === 'success' ? '#3ba55c' : type === 'error' ? '#ed4245' : '#7289da'}">
             ${icons[type] || icons.info}
         </div>
         <div class="notification-content">
@@ -406,7 +679,7 @@ function showNotification(message, type = 'info') {
     
     container.appendChild(notification);
     
-    // Авто-удаление через 5 секунд
+    // Автоудаление через 5 секунд
     setTimeout(() => {
         if (notification.parentElement) {
             notification.remove();
@@ -414,131 +687,39 @@ function showNotification(message, type = 'info') {
     }, 5000);
 }
 
+// Воспроизведение звука сообщения
 function playMessageSound() {
-    const sound = document.getElementById('message-sound');
-    sound.currentTime = 0;
-    sound.play().catch(() => {});
+    const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
+    audio.volume = 0.3;
+    audio.play().catch(() => {});
 }
 
-// Настройка реального времени
-function setupRealtimeListeners() {
-    // Слушаем изменения статусов пользователей
-    firebaseApp.onUsersPresence((users) => {
-        state.users = users;
-        state.onlineUsers = new Set(users.filter(u => u.status === 'online').map(u => u.id));
-        updateOnlineCount();
-        renderMembers();
-    });
-}
-
-function updateOnlineCount() {
-    const count = state.onlineUsers.size;
-    document.getElementById('online-count').textContent = count;
-    document.getElementById('sidebar-online-count').textContent = `${count} онлайн`;
-}
-
-function renderMembers() {
-    const membersList = document.getElementById('members-list');
-    if (!membersList) return;
-    
-    membersList.innerHTML = '';
-    
-    state.users.forEach(user => {
-        const memberElement = document.createElement('div');
-        memberElement.className = 'member-item';
-        memberElement.innerHTML = `
-            <div class="member-avatar">
-                <span>${user.username?.charAt(0).toUpperCase() || 'U'}</span>
-                <div class="member-status status-${user.status || 'offline'}"></div>
-            </div>
-            <div class="member-name">${user.username || 'Пользователь'}</div>
-        `;
-        membersList.appendChild(memberElement);
-    });
-}
-
-// Создание сервера
-function showAddServerModal() {
-    document.getElementById('add-server-modal').style.display = 'flex';
-}
-
-function closeAddServerModal() {
-    document.getElementById('add-server-modal').style.display = 'none';
-}
-
-async function createServer() {
-    const name = document.getElementById('server-name-input').value.trim();
-    const icon = document.getElementById('server-icon-input').value.trim();
-    
-    if (!name) {
-        showNotification('Введите название сервера', 'error');
-        return;
-    }
-    
-    const result = await firebaseApp.createServer(
-        name,
-        icon || null,
-        state.currentUser.uid
-    );
-    
-    if (result.success) {
-        showNotification(`Сервер "${name}" создан!`, 'success');
-        closeAddServerModal();
-        await loadUserData(state.currentUser.uid);
-    } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
-    }
+// Экранирование HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML.replace(/\n/g, '<br>');
 }
 
 // Экспорт функций в глобальную область видимости
-window.switchTab = switchTab;
-window.closeAuthModal = closeAuthModal;
-window.login = login;
-window.register = register;
-window.loginWithGoogle = loginWithGoogle;
-window.loginWithGithub = loginWithGithub;
 window.switchServer = switchServer;
-window.switchChannel = switchChannel;
-window.sendMessage = sendMessage;
-window.handleMessageKeydown = handleMessageKeydown;
-window.showAddServerModal = showAddServerModal;
-window.closeAddServerModal = closeAddServerModal;
+window.showCreateServerModal = showCreateServerModal;
 window.createServer = createServer;
-window.addTextChannel = () => addChannel('text');
-window.addVoiceChannel = () => addChannel('voice');
-
-// Дополнительные функции
-async function addChannel(type) {
-    if (!state.currentServer) return;
-    
-    const name = prompt(`Введите название ${type === 'text' ? 'текстового' : 'голосового'} канала:`);
-    if (!name) return;
-    
-    const result = await firebaseApp.createChannel(
-        state.currentServer.id,
-        name,
-        type,
-        state.currentUser.uid
-    );
-    
-    if (result.success) {
-        showNotification(`Канал "${name}" создан!`, 'success');
-        state.channels = await firebaseApp.getChannels(state.currentServer.id);
-        renderChannels();
-    } else {
-        showNotification(`Ошибка: ${result.error}`, 'error');
-    }
-}
-
-// Обработка PWA
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-            .then(registration => {
-                console.log('ServiceWorker registration successful');
-            })
-            .catch(err => {
-                console.log('ServiceWorker registration failed: ', err);
-            });
-    });
-}
+window.closeModal = closeModal;
+window.showProfileModal = showProfileModal;
+window.updateProfile = updateProfile;
+window.logout = logout;
+window.toggleMute = () => showNotification('Функция микрофона', 'info');
+window.toggleDeafen = () => showNotification('Функция наушников', 'info');
+window.showSettings = () => showNotification('Настройки', 'info');
+window.createTextChannel = () => showNotification('Создание текстового канала', 'info');
+window.createVoiceChannel = () => showNotification('Создание голосового канала', 'info');
+window.showInviteModal = () => showNotification('Приглашение участников', 'info');
+window.showMembers = () => showNotification('Список участников', 'info');
+window.showPinned = () => showNotification('Закрепленные сообщения', 'info');
+window.searchMessages = () => showNotification('Поиск сообщений', 'info');
+window.addEmoji = () => showNotification('Добавление эмодзи', 'info');
+window.attachFile = () => showNotification('Прикрепление файла', 'info');
+window.sendMessage = sendMessage;
+window.handleInputKeydown = handleInputKeydown;
+window.showTerms = () => showNotification('Условия использования', 'info');
