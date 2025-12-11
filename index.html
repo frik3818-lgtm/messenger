@@ -74,42 +74,43 @@
                 </div>
             </form>
             
-            <!-- Форма регистрации -->
-            <form id="register-form" class="auth-form">
-                <div class="form-group">
-                    <label for="register-username">Имя пользователя</label>
-                    <div class="input-with-check">
-                        <input type="text" id="register-username" placeholder="Придумайте уникальный ник" required>
-                        <div class="check-icon" id="username-check"></div>
-                    </div>
-                    <div class="hint" id="username-hint"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="register-email">Email</label>
-                    <div class="input-with-check">
-                        <input type="email" id="register-email" placeholder="Ваш email" required>
-                        <div class="check-icon" id="email-check"></div>
-                    </div>
-                    <div class="hint" id="email-hint"></div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="register-password">Пароль</label>
-                    <input type="password" id="register-password" placeholder="Минимум 6 символов" required>
-                    <div class="password-strength">
-                        <div class="strength-bar"></div>
-                        <div class="strength-text" id="password-strength-text"></div>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="register-confirm">Подтвердите пароль</label>
-                    <input type="password" id="register-confirm" placeholder="Повторите пароль" required>
-                    <div class="hint" id="confirm-hint"></div>
-                </div>
-                
-                <button type="submit" class="btn-primary" id="register-btn">Создать аккаунт</button>
+<!-- Форма регистрации -->
+<form id="register-form" class="auth-form">
+    <div class="form-group">
+        <label for="register-username">Имя пользователя</label>
+        <div class="input-with-check">
+            <input type="text" id="register-username" placeholder="Придумайте уникальный ник" required>
+            <div class="check-icon" id="username-check"></div>
+        </div>
+        <div class="hint" id="username-hint"></div>
+        <div class="username-rules">
+            <small>• 3-20 символов</small><br>
+            <small>• Только буквы, цифры, _ и -</small>
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="register-password">Пароль</label>
+        <input type="password" id="register-password" placeholder="Минимум 6 символов" required>
+        <div class="password-strength">
+            <div class="strength-bar"></div>
+            <div class="strength-text" id="password-strength-text"></div>
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label for="register-confirm">Подтвердите пароль</label>
+        <input type="password" id="register-confirm" placeholder="Повторите пароль" required>
+        <div class="hint" id="confirm-hint"></div>
+    </div>
+    
+    <button type="submit" class="btn-primary" id="register-btn">Создать аккаунт</button>
+    
+    <div class="terms">
+        Регистрируясь, вы соглашаетесь с 
+        <a href="#" onclick="showTerms()">Условиями использования</a>
+    </div>
+</form>
                 
                 <div class="terms">
                     Регистрируясь, вы соглашаетесь с 
