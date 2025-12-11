@@ -24,6 +24,11 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 async function initApp() {
+    // Скрываем загрузчик
+    setTimeout(() => {
+        document.getElementById('loader').style.display = 'none';
+    }, 1000);
+    
     // Проверяем состояние аутентификации
     firebaseApp.onAuthStateChanged(async (user) => {
         if (user) {
@@ -53,13 +58,13 @@ function setupEventListeners() {
     // Обработка формы входа
     loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        await login();
+        await handleLogin();
     });
     
     // Обработка формы регистрации
     registerForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        await register();
+        await handleRegister();
     });
     
     // Забыли пароль
@@ -69,7 +74,7 @@ function setupEventListeners() {
     });
 }
 
-// Настройка валидации формы регистрации (убрана проверка email)
+// Настройка валидации формы регистрации
 function setupRegistrationValidation() {
     const usernameInput = document.getElementById('register-username');
     const passwordInput = document.getElementById('register-password');
@@ -175,10 +180,14 @@ function setupRegistrationValidation() {
         }
         
         // Обновляем UI
-        strengthBar.style.width = (strength * 20) + '%';
-        strengthBar.style.backgroundColor = color;
-        strengthText.textContent = message;
-        strengthText.style.color = color;
+        if (strengthBar) {
+            strengthBar.style.width = (strength * 20) + '%';
+            strengthBar.style.backgroundColor = color;
+        }
+        if (strengthText) {
+            strengthText.textContent = message;
+            strengthText.style.color = color;
+        }
         
         passwordValid = password.length >= 6;
         updateRegisterButton();
@@ -197,20 +206,26 @@ function setupRegistrationValidation() {
         const confirm = confirmInput.value;
         
         if (!confirm) {
-            confirmHint.className = 'hint';
-            confirmHint.textContent = '';
+            if (confirmHint) {
+                confirmHint.className = 'hint';
+                confirmHint.textContent = '';
+            }
             confirmValid = false;
             updateRegisterButton();
             return;
         }
         
         if (password === confirm) {
-            confirmHint.className = 'hint valid';
-            confirmHint.textContent = 'Пароли совпадают';
+            if (confirmHint) {
+                confirmHint.className = 'hint valid';
+                confirmHint.textContent = 'Пароли совпадают';
+            }
             confirmValid = true;
         } else {
-            confirmHint.className = 'hint invalid';
-            confirmHint.textContent = 'Пароли не совпадают';
+            if (confirmHint) {
+                confirmHint.className = 'hint invalid';
+                confirmHint.textContent = 'Пароли не совпадают';
+            }
             confirmValid = false;
         }
         
@@ -218,7 +233,9 @@ function setupRegistrationValidation() {
     }
     
     function updateRegisterButton() {
-        registerBtn.disabled = !(usernameValid && passwordValid && confirmValid);
+        if (registerBtn) {
+            registerBtn.disabled = !(usernameValid && passwordValid && confirmValid);
+        }
     }
 }
 
@@ -239,7 +256,7 @@ function switchAuthTab(tab) {
 }
 
 // Вход в систему
-async function login() {
+async function handleLogin() {
     const username = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
     
@@ -248,7 +265,7 @@ async function login() {
         return;
     }
     
-    const result = await firebaseApp.loginUser(username, password);
+    const result = await firebaseApp.loginUserSimple(username, password);
     
     if (result.success) {
         showNotification(result.message, 'success');
@@ -258,7 +275,8 @@ async function login() {
     }
 }
 
-async function register() {
+// Регистрация
+async function handleRegister() {
     const username = document.getElementById('register-username').value.trim();
     const password = document.getElementById('register-password').value;
     
@@ -298,24 +316,71 @@ async function register() {
     }
 }
 
-// Вход (обновленная версия)
-async function login() {
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value;
+// Забыли пароль
+async function forgotPassword() {
+    const username = prompt('Введите ваш ник для восстановления пароля:');
     
-    if (!username || !password) {
-        showNotification('Заполните все поля', 'error');
-        return;
+    if (!username) return;
+    
+    try {
+        // Находим пользователя по нику
+        const usersCollection = firebase.firestore().collection('users');
+        const snapshot = await usersCollection
+            .where('username', '==', username.toLowerCase())
+            .limit(1)
+            .get();
+        
+        if (snapshot.empty) {
+            showNotification('Пользователь не найден', 'error');
+            return;
+        }
+        
+        const userData = snapshot.docs[0].data();
+        const email = userData.email;
+        
+        if (!email) {
+            showNotification('У этого аккаунта нет email для восстановления', 'error');
+            return;
+        }
+        
+        await firebase.auth().sendPasswordResetEmail(email);
+        showNotification('Инструкции по восстановлению отправлены на email', 'success');
+    } catch (error) {
+        console.error('Error sending password reset:', error);
+        showNotification('Ошибка отправки email восстановления', 'error');
     }
-    
-    // Используем упрощенный вход
-    const result = await firebaseApp.loginUserSimple(username, password);
-    
-    if (result.success) {
-        showNotification(result.message, 'success');
-        // Приложение автоматически переключится через onAuthStateChanged
-    } else {
-        showNotification(result.error, 'error');
+}
+
+// Загрузка данных пользователя
+async function loadUserData(userId) {
+    try {
+        // Загружаем данные пользователя
+        state.currentUserData = await firebaseApp.getUserData(userId);
+        
+        if (!state.currentUserData) {
+            await firebaseApp.logoutUser(userId);
+            return;
+        }
+        
+        // Сохраняем данные в localStorage
+        localStorage.setItem('username', state.currentUserData.displayName);
+        localStorage.setItem('avatar', state.currentUserData.avatar);
+        
+        // Обновляем UI
+        updateUserUI();
+        
+        // Загружаем серверы пользователя
+        state.servers = await firebaseApp.getUserServers(userId);
+        renderServers();
+        
+        // Если есть серверы, загружаем первый
+        if (state.servers.length > 0) {
+            await switchServer(state.servers[0]);
+        }
+        
+    } catch (error) {
+        console.error('Error loading user data:', error);
+        showNotification('Ошибка загрузки данных', 'error');
     }
 }
 
@@ -324,7 +389,7 @@ function updateUserUI() {
     const usernameElement = document.getElementById('current-username');
     const avatarElement = document.getElementById('user-avatar');
     
-    if (state.currentUserData) {
+    if (state.currentUserData && usernameElement && avatarElement) {
         usernameElement.textContent = state.currentUserData.displayName;
         avatarElement.textContent = state.currentUserData.displayName.charAt(0).toUpperCase();
         avatarElement.style.background = '#7289da';
@@ -350,13 +415,18 @@ function showApp() {
     
     // Фокус на поле ввода сообщения
     setTimeout(() => {
-        document.getElementById('message-input').focus();
+        const messageInput = document.getElementById('message-input');
+        if (messageInput) {
+            messageInput.focus();
+        }
     }, 100);
 }
 
 // Рендер серверов
 function renderServers() {
     const serversList = document.getElementById('servers-list');
+    if (!serversList) return;
+    
     serversList.innerHTML = '';
     
     state.servers.forEach(server => {
@@ -376,8 +446,13 @@ function renderServers() {
 
 // Переключение сервера
 async function switchServer(server) {
+    if (!server || !event) return;
+    
     state.currentServer = server;
-    document.getElementById('server-name').textContent = server.name;
+    const serverNameElement = document.getElementById('server-name');
+    if (serverNameElement) {
+        serverNameElement.textContent = server.name;
+    }
     
     // Обновляем активный сервер в UI
     document.querySelectorAll('.server-item').forEach(item => {
@@ -393,7 +468,10 @@ async function switchServer(server) {
 // Загрузка сообщений
 async function loadMessages(channelName) {
     state.currentChannel = channelName;
-    document.getElementById('current-channel').textContent = channelName;
+    const channelElement = document.getElementById('current-channel');
+    if (channelElement) {
+        channelElement.textContent = channelName;
+    }
     
     // Загружаем сообщения
     state.messages = await firebaseApp.getMessages(channelName);
@@ -406,6 +484,7 @@ async function loadMessages(channelName) {
 // Рендер сообщений
 function renderMessages() {
     const container = document.getElementById('messages-container');
+    if (!container) return;
     
     if (state.messages.length === 0) {
         container.innerHTML = `
@@ -461,7 +540,11 @@ function createMessageElement(message) {
 function setupRealtimeMessages(channelName) {
     // Здесь можно добавить подписку на реальное время
     // Для простоты используем периодическую проверку
-    setInterval(async () => {
+    if (state.messageInterval) {
+        clearInterval(state.messageInterval);
+    }
+    
+    state.messageInterval = setInterval(async () => {
         const newMessages = await firebaseApp.getMessages(channelName);
         if (newMessages.length !== state.messages.length) {
             state.messages = newMessages;
@@ -478,6 +561,8 @@ function setupRealtimeMessages(channelName) {
 // Отправка сообщения
 async function sendMessage() {
     const input = document.getElementById('message-input');
+    if (!input) return;
+    
     const content = input.value.trim();
     
     if (!content || !state.currentChannel || !state.currentUser) return;
@@ -521,22 +606,31 @@ function handleInputKeydown(event) {
 
 // Показать модальное окно создания сервера
 function showCreateServerModal() {
-    document.getElementById('server-title').value = '';
-    document.getElementById('server-icon').value = '';
-    document.getElementById('modal-overlay').style.display = 'flex';
-    document.getElementById('create-server-modal').style.display = 'block';
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modal = document.getElementById('create-server-modal');
+    
+    if (modalOverlay && modal) {
+        document.getElementById('server-title').value = '';
+        document.getElementById('server-icon').value = '';
+        modalOverlay.style.display = 'flex';
+        modal.style.display = 'block';
+    }
 }
 
 // Создание сервера
 async function createServer() {
-    const name = document.getElementById('server-title').value.trim();
+    const nameInput = document.getElementById('server-title');
+    if (!nameInput) return;
+    
+    const name = nameInput.value.trim();
     
     if (!name) {
         showNotification('Введите название сервера', 'error');
         return;
     }
     
-    const icon = document.getElementById('server-icon').value.trim() || null;
+    const iconInput = document.getElementById('server-icon');
+    const icon = iconInput ? iconInput.value.trim() || null : null;
     
     const result = await firebaseApp.createServer(
         name,
@@ -559,7 +653,11 @@ async function createServer() {
 
 // Закрыть модальное окно
 function closeModal() {
-    document.getElementById('modal-overlay').style.display = 'none';
+    const modalOverlay = document.getElementById('modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.style.display = 'none';
+    }
+    
     document.querySelectorAll('.modal').forEach(modal => {
         modal.style.display = 'none';
     });
@@ -569,19 +667,33 @@ function closeModal() {
 function showProfileModal() {
     if (!state.currentUserData) return;
     
-    document.getElementById('profile-username').value = state.currentUserData.displayName;
-    document.getElementById('profile-email').value = state.currentUserData.email;
-    document.getElementById('profile-status').value = state.currentUserData.status || 'online';
+    const profileUsername = document.getElementById('profile-username');
+    const profileEmail = document.getElementById('profile-email');
+    const profileStatus = document.getElementById('profile-status');
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modal = document.getElementById('profile-modal');
     
-    document.getElementById('modal-overlay').style.display = 'flex';
-    document.getElementById('profile-modal').style.display = 'block';
+    if (profileUsername) profileUsername.value = state.currentUserData.displayName;
+    if (profileEmail) profileEmail.value = state.currentUserData.email || '';
+    if (profileStatus) profileStatus.value = state.currentUserData.status || 'online';
+    
+    if (modalOverlay && modal) {
+        modalOverlay.style.display = 'flex';
+        modal.style.display = 'block';
+    }
 }
 
 // Обновление профиля
 async function updateProfile() {
-    const status = document.getElementById('profile-status').value;
+    const statusElement = document.getElementById('profile-status');
+    if (!statusElement) return;
+    
+    const status = statusElement.value;
     
     try {
+        // Получаем ссылку на коллекцию users
+        const usersCollection = firebase.firestore().collection('users');
+        
         await usersCollection.doc(state.currentUser.uid).update({
             status: status
         });
@@ -591,6 +703,7 @@ async function updateProfile() {
         showNotification('Профиль обновлен', 'success');
         
     } catch (error) {
+        console.error('Error updating profile:', error);
         showNotification('Ошибка обновления профиля', 'error');
     }
 }
@@ -611,6 +724,7 @@ async function logout() {
 // Показать уведомление
 function showNotification(message, type = 'info') {
     const container = document.getElementById('notifications-container');
+    if (!container) return;
     
     const notification = document.createElement('div');
     notification.className = 'notification';
@@ -645,16 +759,30 @@ function showNotification(message, type = 'info') {
 
 // Воспроизведение звука сообщения
 function playMessageSound() {
-    const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
-    audio.volume = 0.3;
-    audio.play().catch(() => {});
+    try {
+        const audio = new Audio('https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3');
+        audio.volume = 0.3;
+        audio.play().catch(() => {});
+    } catch (error) {
+        console.error('Error playing sound:', error);
+    }
 }
 
 // Экранирование HTML
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML.replace(/\n/g, '<br>');
+}
+
+// Обновление аватара
+function updateAvatarPreview() {
+    const avatarPreview = document.getElementById('avatar-preview');
+    if (!avatarPreview) return;
+    
+    const username = localStorage.getItem('username') || 'U';
+    avatarPreview.innerHTML = username.charAt(0).toUpperCase();
 }
 
 // Экспорт функций в глобальную область видимости
