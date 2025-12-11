@@ -1,4 +1,4 @@
-// Конфигурация Firebase
+// Конфигурация Firebase (замените на свою)
 const firebaseConfig = {
     apiKey: "AIzaSyD7QtF9c4WgQOv2v_8K23_B9vY-5VK1V7M",
     authDomain: "anubis-messenger.firebaseapp.com",
@@ -40,49 +40,32 @@ const firebaseApp = {
         }
     },
 
-    // Проверка доступности email
-    async checkEmailAvailability(email) {
+    // Упрощенная регистрация (без email подтверждения)
+    async registerUserSimple(username, password) {
         try {
-            const snapshot = await usersCollection
-                .where('email', '==', email.toLowerCase())
-                .limit(1)
-                .get();
-            
-            return {
-                available: snapshot.empty,
-                message: snapshot.empty ? 'Email свободен' : 'Email уже используется'
-            };
-        } catch (error) {
-            console.error('Error checking email:', error);
-            return { available: false, message: 'Ошибка проверки' };
-        }
-    },
-
-    // Регистрация пользователя
-    async registerUser(username, email, password) {
-        try {
-            // Проверяем ник и email
+            // Проверяем ник
             const usernameCheck = await this.checkUsernameAvailability(username);
-            const emailCheck = await this.checkEmailAvailability(email);
             
             if (!usernameCheck.available) {
                 return { success: false, error: 'Этот ник уже занят' };
             }
             
-            if (!emailCheck.available) {
-                return { success: false, error: 'Этот email уже используется' };
-            }
+            // Создаем уникальный email на основе ника (чтобы обойти проверку Firebase)
+            const uniqueEmail = `${username.toLowerCase()}@anubis.local`;
             
             // Создаем пользователя в Firebase Auth
-            const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+            const userCredential = await auth.createUserWithEmailAndPassword(uniqueEmail, password);
             const user = userCredential.user;
             
-            // Сохраняем дополнительные данные в Firestore
+            // Обновляем email на пустой (не используется)
+            await user.updateEmail("");
+            
+            // Сохраняем данные в Firestore
             await usersCollection.doc(user.uid).set({
                 uid: user.uid,
                 username: username.toLowerCase(),
                 displayName: username,
-                email: email.toLowerCase(),
+                email: "", // Пустой email
                 avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=7289da&color=fff`,
                 status: 'online',
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -106,16 +89,69 @@ const firebaseApp = {
             
             switch(error.code) {
                 case 'auth/email-already-in-use':
-                    errorMessage = 'Этот email уже используется';
+                    errorMessage = 'Пользователь с таким ником уже существует';
                     break;
                 case 'auth/invalid-email':
-                    errorMessage = 'Неверный формат email';
+                    errorMessage = 'Недопустимый ник';
                     break;
                 case 'auth/operation-not-allowed':
                     errorMessage = 'Регистрация временно отключена';
                     break;
                 case 'auth/weak-password':
-                    errorMessage = 'Пароль слишком слабый';
+                    errorMessage = 'Пароль слишком слабый (минимум 6 символов)';
+                    break;
+            }
+            
+            return { success: false, error: errorMessage };
+        }
+    },
+
+    // Упрощенный вход (по нику и паролю)
+    async loginUserSimple(username, password) {
+        try {
+            // Находим пользователя по никнейму
+            const snapshot = await usersCollection
+                .where('username', '==', username.toLowerCase())
+                .limit(1)
+                .get();
+            
+            if (snapshot.empty) {
+                return { success: false, error: 'Пользователь не найден' };
+            }
+            
+            // Создаем уникальный email для входа
+            const uniqueEmail = `${username.toLowerCase()}@anubis.local`;
+            
+            // Входим с этим email и паролем
+            const userCredential = await auth.signInWithEmailAndPassword(uniqueEmail, password);
+            const user = userCredential.user;
+            
+            // Обновляем статус пользователя
+            await usersCollection.doc(user.uid).update({
+                status: 'online',
+                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            
+            return { 
+                success: true, 
+                user: user,
+                message: 'Вход выполнен успешно!' 
+            };
+            
+        } catch (error) {
+            console.error('Login error:', error);
+            
+            let errorMessage = 'Ошибка входа';
+            
+            switch(error.code) {
+                case 'auth/user-not-found':
+                    errorMessage = 'Пользователь не найден';
+                    break;
+                case 'auth/wrong-password':
+                    errorMessage = 'Неверный пароль';
+                    break;
+                case 'auth/user-disabled':
+                    errorMessage = 'Аккаунт отключен';
                     break;
             }
             
@@ -130,7 +166,7 @@ const firebaseApp = {
                 name: `${username}'s Server`,
                 ownerId: userId,
                 members: [userId],
-                channels: ['general', 'chat', 'voice'],
+                channels: ['general', 'chat'],
                 createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             
@@ -144,7 +180,6 @@ const firebaseApp = {
             // Создаем каналы
             await this.createChannel(serverRef.id, 'general', 'text', userId);
             await this.createChannel(serverRef.id, 'chat', 'text', userId);
-            await this.createChannel(serverRef.id, 'Voice Chat', 'voice', userId);
             
             return serverRef.id;
             
@@ -162,7 +197,7 @@ const firebaseApp = {
                 type: type,
                 creatorId: creatorId,
                 createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                topic: type === 'text' ? 'Добро пожаловать!' : 'Голосовой канал'
+                topic: 'Добро пожаловать!'
             };
             
             const channelsCollection = db.collection('channels');
@@ -170,64 +205,6 @@ const firebaseApp = {
             
         } catch (error) {
             console.error('Error creating channel:', error);
-        }
-    },
-
-    // Вход пользователя
-    async loginUser(username, password) {
-        try {
-            // Сначала находим пользователя по никнейму
-            const snapshot = await usersCollection
-                .where('username', '==', username.toLowerCase())
-                .limit(1)
-                .get();
-            
-            if (snapshot.empty) {
-                return { success: false, error: 'Пользователь не найден' };
-            }
-            
-            const userDoc = snapshot.docs[0];
-            const userData = userDoc.data();
-            const email = userData.email;
-            
-            // Пытаемся войти с email и паролем
-            const userCredential = await auth.signInWithEmailAndPassword(email, password);
-            const user = userCredential.user;
-            
-            // Обновляем статус пользователя
-            await usersCollection.doc(user.uid).update({
-                status: 'online',
-                lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            
-            return { 
-                success: true, 
-                user: user,
-                userData: userData,
-                message: 'Вход выполнен успешно!' 
-            };
-            
-        } catch (error) {
-            console.error('Login error:', error);
-            
-            let errorMessage = 'Ошибка входа';
-            
-            switch(error.code) {
-                case 'auth/user-not-found':
-                    errorMessage = 'Пользователь не найден';
-                    break;
-                case 'auth/wrong-password':
-                    errorMessage = 'Неверный пароль';
-                    break;
-                case 'auth/invalid-email':
-                    errorMessage = 'Неверный формат email';
-                    break;
-                case 'auth/user-disabled':
-                    errorMessage = 'Аккаунт отключен';
-                    break;
-            }
-            
-            return { success: false, error: errorMessage };
         }
     },
 
@@ -332,7 +309,7 @@ const firebaseApp = {
                 messages.push({ id: doc.id, ...doc.data() });
             });
             
-            return messages.reverse(); // Возвращаем в правильном порядке
+            return messages.reverse();
             
         } catch (error) {
             console.error('Error getting messages:', error);
