@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Discord Messenger | Реальный чат</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="assets/icons/icon-192.png">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.5.0/firebase-messaging-compat.js"></script>
+</head>
+<body>
+    <!-- Модальное окно входа/регистрации -->
+    <div id="auth-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Вход в Discord Messenger</h2>
+                <button class="close-btn" onclick="closeAuthModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="auth-tabs">
+                    <button class="tab-btn active" onclick="switchTab('login')">Вход</button>
+                    <button class="tab-btn" onclick="switchTab('register')">Регистрация</button>
+                </div>
+                
+                <div id="login-form" class="auth-form">
+                    <div class="form-group">
+                        <label for="login-email">Email</label>
+                        <input type="email" id="login-email" placeholder="ваш@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password">Пароль</label>
+                        <input type="password" id="login-password" placeholder="Ваш пароль">
+                    </div>
+                    <button class="btn-primary" onclick="login()">Войти</button>
+                    <div class="auth-divider">
+                        <span>или войти с помощью</span>
+                    </div>
+                    <button class="btn-google" onclick="loginWithGoogle()">
+                        <i class="fab fa-google"></i> Google
+                    </button>
+                    <button class="btn-github" onclick="loginWithGithub()">
+                        <i class="fab fa-github"></i> GitHub
+                    </button>
+                </div>
+                
+                <div id="register-form" class="auth-form" style="display: none;">
+                    <div class="form-group">
+                        <label for="register-username">Имя пользователя</label>
+                        <input type="text" id="register-username" placeholder="Ваше имя в чате">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-email">Email</label>
+                        <input type="email" id="register-email" placeholder="ваш@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-password">Пароль</label>
+                        <input type="password" id="register-password" placeholder="Минимум 6 символов">
+                    </div>
+                    <div class="form-group">
+                        <label for="register-avatar">Аватар (URL)</label>
+                        <input type="text" id="register-avatar" placeholder="https://... (необязательно)">
+                    </div>
+                    <button class="btn-primary" onclick="register()">Зарегистрироваться</button>
+                </div>
+                
+                <div class="auth-footer">
+                    <p>Нажимая кнопку, вы соглашаетесь с <a href="#">Условиями использования</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Основной интерфейс -->
+    <div class="container" id="main-app" style="display: none;">
+        <!-- Боковая панель серверов -->
+        <div class="servers-sidebar">
+            <div class="server-item active" onclick="switchServer('home')" title="Главная">
+                <i class="fas fa-home"></i>
+            </div>
+            <div class="server-divider"></div>
+            <div id="servers-list">
+                <!-- Серверы будут загружены динамически -->
+            </div>
+            <div class="server-item add-server" onclick="showAddServerModal()" title="Добавить сервер">
+                <i class="fas fa-plus"></i>
+            </div>
+        </div>
+
+        <!-- Панель каналов -->
+        <div class="channels-sidebar">
+            <div class="server-header" id="server-header">
+                <span id="server-name">Выберите сервер</span>
+                <div class="header-actions">
+                    <button class="icon-btn" onclick="showInviteModal()" title="Пригласить">
+                        <i class="fas fa-user-plus"></i>
+                    </button>
+                    <button class="icon-btn" onclick="showServerSettings()" title="Настройки">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="channels-container">
+                <div class="channels-category">
+                    <div class="category-header">
+                        <span>ТЕКСТОВЫЕ КАНАЛЫ</span>
+                        <button class="add-channel-btn" onclick="addTextChannel()">+</button>
+                    </div>
+                    <div id="text-channels-list">
+                        <!-- Текстовые каналы -->
+                    </div>
+                </div>
+                
+                <div class="channels-category">
+                    <div class="category-header">
+                        <span>ГОЛОСОВЫЕ КАНАЛЫ</span>
+                        <button class="add-channel-btn" onclick="addVoiceChannel()">+</button>
+                    </div>
+                    <div id="voice-channels-list">
+                        <!-- Голосовые каналы -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="user-panel">
+                <div class="user-info" id="current-user-info">
+                    <!-- Информация о пользователе -->
+                </div>
+                <div class="user-actions">
+                    <button class="icon-btn" onclick="toggleMute()" title="Микрофон">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                    <button class="icon-btn" onclick="toggleDeafen()" title="Наушники">
+                        <i class="fas fa-headphones"></i>
+                    </button>
+                    <button class="icon-btn" onclick="showUserSettings()" title="Настройки">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Основная область чата -->
+        <div class="main-chat">
+            <div class="chat-header">
+                <div class="channel-info">
+                    <i class="fas fa-hashtag"></i>
+                    <span id="current-channel-name">general</span>
+                    <div class="channel-topic" id="channel-topic">Добро пожаловать в общий чат!</div>
+                </div>
+                <div class="chat-actions">
+                    <button class="icon-btn" onclick="toggleMemberList()" title="Участники">
+                        <i class="fas fa-users"></i>
+                        <span class="badge" id="online-count">0</span>
+                    </button>
+                    <button class="icon-btn" onclick="showPinModal()" title="Закрепленные">
+                        <i class="fas fa-thumbtack"></i>
+                    </button>
+                    <button class="icon-btn" onclick="showSearch()" title="Поиск">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <div class="voice-controls" id="voice-controls" style="display: none;">
+                        <button class="voice-btn" onclick="leaveVoiceChannel()">
+                            <i class="fas fa-phone-slash"></i> Выйти
+                        </button>
+                        <div class="voice-users" id="voice-users">
+                            <!-- Участники голосового канала -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="messages-container" id="messages-container">
+                <!-- Сообщения будут загружены динамически -->
+                <div class="welcome-message">
+                    <h1>Добро пожаловать в Discord Messenger!</h1>
+                    <p>Это начало канала <strong>#general</strong>.</p>
+                    <p>Начните общение, отправив сообщение ниже.</p>
+                </div>
+            </div>
+            
+            <div class="message-input-container">
+                <div class="input-actions">
+                    <button class="input-btn" onclick="addEmoji()" title="Эмодзи">
+                        <i class="far fa-smile"></i>
+                    </button>
+                    <button class="input-btn" onclick="attachFile()" title="Прикрепить файл">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                    <button class="input-btn" onclick="showGifPicker()" title="GIF">
+                        <i class="fas fa-photo-video"></i>
+                    </button>
+                </div>
+                <textarea 
+                    id="message-input" 
+                    placeholder="Написать сообщение в #general" 
+                    rows="1"
+                    onkeydown="handleMessageKeydown(event)"
+                ></textarea>
+                <div class="send-button">
+                    <button class="btn-send" onclick="sendMessage()" title="Отправить (Enter)">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Панель участников -->
+        <div class="members-sidebar" id="members-sidebar">
+            <div class="members-header">
+                <h3>УЧАСТНИКИ</h3>
+                <span class="online-count" id="sidebar-online-count">0 онлайн</span>
+            </div>
+            <div class="members-list" id="members-list">
+                <!-- Список участников -->
+            </div>
+        </div>
+
+        <!-- Модальные окна -->
+        <div id="add-server-modal" class="modal">
+            <div class="modal-content">
+                <h2>Создать сервер</h2>
+                <input type="text" id="server-name-input" placeholder="Название сервера">
+                <input type="text" id="server-icon-input" placeholder="URL иконки (необязательно)">
+                <div class="modal-buttons">
+                    <button class="btn-secondary" onclick="closeAddServerModal()">Отмена</button>
+                    <button class="btn-primary" onclick="createServer()">Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Уведомления -->
+    <div id="notifications-container"></div>
+
+    <!-- Аудио для уведомлений -->
+    <audio id="message-sound" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3" type="audio/mpeg">
+    </audio>
+
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
+    
+    <!-- PWA Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js')
+                .then(() => console.log('Service Worker зарегистрирован'))
+                .catch(err => console.log('Ошибка регистрации Service Worker:', err));
+        }
+    </script>
+</body>
+</html>
