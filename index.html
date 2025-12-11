@@ -55,47 +55,39 @@
                 <button class="tab-btn" id="register-tab">Регистрация</button>
             </div>
             
-            <!-- Форма входа -->
-            <form id="login-form" class="auth-form active">
-                <div class="form-group">
-                    <label for="login-username">Имя пользователя</label>
-                    <input type="text" id="login-username" placeholder="Введите ваш ник" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="login-password">Пароль</label>
-                    <input type="password" id="login-password" placeholder="Введите пароль" required>
-                </div>
-                
-                <button type="submit" class="btn-primary">Войти в систему</button>
-                
-                <div class="auth-links">
-                    <a href="#" id="forgot-password">Забыли пароль?</a>
-                </div>
-            </form>
-            
+<!-- Форма входа -->
+<form id="login-form" class="auth-form active">
+    <div class="form-group">
+        <label for="login-username">Имя пользователя</label>
+        <input type="text" id="login-username" placeholder="Введите ваш ник" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="login-password">Пароль</label>
+        <input type="password" id="login-password" placeholder="Введите пароль" required>
+    </div>
+    
+    <button type="submit" class="btn-primary">Войти в систему</button>
+    
+    <div class="auth-links">
+        <a href="#" id="forgot-password">Забыли пароль?</a>
+    </div>
+</form>
+
 <!-- Форма регистрации -->
 <form id="register-form" class="auth-form">
     <div class="form-group">
         <label for="register-username">Имя пользователя</label>
         <div class="input-with-check">
-            <input type="text" id="register-username" placeholder="Придумайте уникальный ник" required>
+            <input type="text" id="register-username" placeholder="Придумайте ник (3-20 символов)" required>
             <div class="check-icon" id="username-check"></div>
         </div>
-        <div class="hint" id="username-hint"></div>
-        <div class="username-rules">
-            <small>• 3-20 символов</small><br>
-            <small>• Только буквы, цифры, _ и -</small>
-        </div>
+        <div class="hint" id="username-hint">Только буквы, цифры, _ и -</div>
     </div>
     
     <div class="form-group">
         <label for="register-password">Пароль</label>
         <input type="password" id="register-password" placeholder="Минимум 6 символов" required>
-        <div class="password-strength">
-            <div class="strength-bar"></div>
-            <div class="strength-text" id="password-strength-text"></div>
-        </div>
     </div>
     
     <div class="form-group">
@@ -111,27 +103,6 @@
         <a href="#" onclick="showTerms()">Условиями использования</a>
     </div>
 </form>
-                
-                <div class="terms">
-                    Регистрируясь, вы соглашаетесь с 
-                    <a href="#" onclick="showTerms()">Условиями использования</a>
-                </div>
-            </form>
-            
-            <div class="demo-accounts">
-                <p>Демо аккаунты для теста:</p>
-                <div class="demo-account">
-                    <span>Логин:</span> <code>test_user</code>
-                    <span>Пароль:</span> <code>123456</code>
-                </div>
-                <div class="demo-account">
-                    <span>Логин:</span> <code>demo</code>
-                    <span>Пароль:</span> <code>demo123</code>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Основное приложение -->
     <div class="app-container" id="app-container">
         <!-- Боковая панель серверов -->
