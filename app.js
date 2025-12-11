@@ -69,23 +69,19 @@ function setupEventListeners() {
     });
 }
 
-// Настройка валидации формы регистрации
+// Настройка валидации формы регистрации (убрана проверка email)
 function setupRegistrationValidation() {
     const usernameInput = document.getElementById('register-username');
-    const emailInput = document.getElementById('register-email');
     const passwordInput = document.getElementById('register-password');
     const confirmInput = document.getElementById('register-confirm');
     const usernameCheck = document.getElementById('username-check');
-    const emailCheck = document.getElementById('email-check');
     const usernameHint = document.getElementById('username-hint');
-    const emailHint = document.getElementById('email-hint');
     const confirmHint = document.getElementById('confirm-hint');
     const strengthText = document.getElementById('password-strength-text');
     const strengthBar = document.querySelector('.strength-bar');
     const registerBtn = document.getElementById('register-btn');
     
     let usernameValid = false;
-    let emailValid = false;
     let passwordValid = false;
     let confirmValid = false;
     
@@ -136,37 +132,6 @@ function setupRegistrationValidation() {
         }
         
         usernameHint.textContent = result.message;
-        updateRegisterButton();
-    });
-    
-    // Проверка email при вводе
-    emailInput.addEventListener('input', async () => {
-        const email = emailInput.value.trim();
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        
-        if (!emailRegex.test(email)) {
-            emailCheck.className = 'check-icon';
-            emailHint.className = 'hint invalid';
-            emailHint.textContent = 'Неверный формат email';
-            emailValid = false;
-            updateRegisterButton();
-            return;
-        }
-        
-        // Проверка доступности email
-        const result = await firebaseApp.checkEmailAvailability(email);
-        
-        if (result.available) {
-            emailCheck.className = 'check-icon available';
-            emailHint.className = 'hint valid';
-            emailValid = true;
-        } else {
-            emailCheck.className = 'check-icon taken';
-            emailHint.className = 'hint invalid';
-            emailValid = false;
-        }
-        
-        emailHint.textContent = result.message;
         updateRegisterButton();
     });
     
@@ -253,7 +218,7 @@ function setupRegistrationValidation() {
     }
     
     function updateRegisterButton() {
-        registerBtn.disabled = !(usernameValid && emailValid && passwordValid && confirmValid);
+        registerBtn.disabled = !(usernameValid && passwordValid && confirmValid);
     }
 }
 
